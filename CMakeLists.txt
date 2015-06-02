@@ -41,7 +41,7 @@ if( RAKNET_GENERATE_INCLUDE_ONLY_DIR )
 	message( STATUS "DONE: Setting up the ${RAKNET_NAMED_INCLUDE_ONLY_DIR} directory." )
 endif()
 
-set( RAKNET_INCLUDE_DIRS ${RAKNETHEADERFILES} ${RAKNET_INCLUDE_ONLY_DIR} PARENT_SCOPE ) # Visible from outside
+set( RAKNET_INCLUDE_DIRS ${RAKNETHEADERFILES} ${RAKNET_INCLUDE_ONLY_DIR} ) # Visible from outside
 
 include(./CmakeIncludes/CmakeMacros.txt)
 FIXLINKOPTIONS()
