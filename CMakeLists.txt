@@ -22,6 +22,7 @@ ELSE(WIN32 AND NOT UNIX)
 	set(RAKNET_LIBRARY_LIBS pthread)
 ENDIF(WIN32 AND NOT UNIX)
 
+set(CMAKE_DEBUG_POSTFIX "_d")
 
 # Options
 option( RAKNET_ENABLE_SAMPLES 	"Generate RakNet sample projects if true." 		TRUE  )
