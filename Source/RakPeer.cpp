@@ -53,6 +53,7 @@
 #include "SuperFastHash.h"
 #include "RakAlloca.h"
 #include "WSAStartupSingleton.h"
+#include "PacketLogger.h"
 
 #ifdef USE_THREADED_SEND
 #include "SendToThread.h"
@@ -199,6 +200,10 @@ RakPeer::RakPeer()
 	_cookie_jar = 0;
 #endif
 
+	//
+	// Dummy call to PacketLogger to ensure it's included in exported symbols.
+	//
+	PacketLogger::BaseIDTOString(0);
 	StringCompressor::AddReference();
 	RakNet::StringTable::AddReference();
 	WSAStartupSingleton::AddRef();

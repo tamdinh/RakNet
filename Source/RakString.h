@@ -11,10 +11,10 @@
 #ifndef __RAK_STRING_H
 #define __RAK_STRING_H 
 
+#include <cstdio>
 #include "Export.h"
 #include "DS_List.h"
 #include "RakNetTypes.h" // int64_t
-#include <stdio.h>
 #include "stdarg.h"
 
 
