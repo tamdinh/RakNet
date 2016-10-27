@@ -16,31 +16,30 @@
 #include "StringCompressor.h"
 #include "BitStream.h"
 #include "RakPeerInterface.h"
-#include "RakNetworkFactory.h"
 
 #include <cstdio>
 #include <cstring>
 #include <stdlib.h>
 
-#ifdef WIN32
-#include <conio.h>
-#else
-#include "../Unix/kbhit.h"
-#endif
+//#ifdef WIN32
+//#include <conio.h>
+//#else
+//#include "kbhit.h"
+//#endif
 
 #ifdef _WIN32
 #include <conio.h>
 #include <windows.h> // Sleep
 #else
-#include "../Unix/kbhit.h"
+#include "kbhit.h"
 #include <unistd.h> // usleep
 #endif
 
 #define READCHAR(arg) gets(arg); ch=arg[0];
 
-// remove this
-#include "PacketEnumerations.h"
-
+#include "MessageIdentifiers.h"
+#define MAX_CLIENTS 10
+#define SERVER_PORT 60000
 int main(void)
 {
 	printf("DEPRECIATED - Use LightweightDatabase instead\n");
@@ -57,8 +56,9 @@ int main(void)
 	Packet *p;
 
 	// Create a fake game
-	testGameServerOrClient = RakNetworkFactory::GetRakPeerInterface();
-	testGameServerOrClient->Initialize(8, 60003, 0);
+    testGameServerOrClient = RakPeerInterface::GetInstance();
+    RakNet::SocketDescriptor sd;
+    testGameServerOrClient->Startup(1, &sd, 1);  //	testGameServerOrClient->Initialize(8, 60003, 0);
 	testGameServerOrClient->SetMaximumIncomingConnections(8);
 	testGameServerOrClient->AttachPlugin(&masterClient);
 
@@ -66,13 +66,23 @@ int main(void)
 	printf("The master client is used by game servers to advertise themselves.\n");
 	printf("On the master server and by game clients to download a list of game servers\n");
 	printf("Difficulty: Intermediate\n\n");
-
-	if (masterClient.Connect("127.0.0.1", 60000))
+    printf("Enter server IP or hit enter for 127.0.0.1\n");
+    
+    gets(str);
+    if (str[0]==0){
+        strcpy(str, "127.0.0.1");
+    }
+    printf("Starting the client.\n");
+    
+	if (masterClient.Connect(str, SERVER_PORT))
 		printf("Master client connecting...\n");
 	else
 		printf("Master client failed to start or connect.\n");
 
 	printf("(Q)uit\n(q)uery master server\n(l)ist server\n(d)elist server\n(D)isconnect from the master server.\n(a)dd rule\n(r)emove rule\n(p)ing server list\n(C)onnect to the master server.\n(c)onnect to another game, using NAT punch-through with master server, bypassing most NATs\n(SPACE) print server list\n");
+//    TCPInterface* tcp = new TCPInterface() ;
+//    tcp->Connect("kimkhanh.iwin.me",19124);
+//    
 	char buff[256];
 	while (1)
 	{
@@ -106,13 +116,18 @@ int main(void)
 			else if (ch=='D')
 			{
 				printf("Disconnected.\n");
-				PlayerID playerId;
-				testGameServerOrClient->IPToPlayerID("127.0.0.1", 60000, &playerId);
+//				PlayerID playerId;
+                RakNetGUID playerId;
+//				testGameServerOrClient->IPToPlayerID("127.0.0.1", 60000, &playerId);
+                SystemAddress sa;
+                sa.FromStringExplicitPort(str, 60000);
+                playerId = testGameServerOrClient->GetGuidFromSystemAddress(sa);
+                
 				testGameServerOrClient->CloseConnection(playerId, true, 0);
 			}
 			else if (ch=='C')
 			{
-				if (masterClient.Connect("127.0.0.1", 60000))
+				if (masterClient.Connect(str, 60000))
 					printf("Master client connecting...\n");
 				else
 					printf("Master client failed to start or connect.\n");
@@ -219,7 +234,7 @@ int main(void)
 	}
 
 	masterClient.Disconnect();
-	RakNetworkFactory::DestroyRakPeerInterface(testGameServerOrClient);
-
+//	RakNetworkFactory::DestroyRakPeerInterface(testGameServerOrClient);
+    RakPeerInterface::DestroyInstance(testGameServerOrClient);
 	return 0;
 }

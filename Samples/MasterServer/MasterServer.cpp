@@ -11,11 +11,10 @@
 #include "MasterServer.h"
 #include "RakPeerInterface.h"
 #include "BitStream.h"
-#include "RakNetworkFactory.h"
-#include "PacketEnumerations.h"
 #include "StringCompressor.h"
 #include "GetTime.h"
 #include "RakNetStatistics.h"
+#include "MessageIdentifiers.h"
 
 // Uncomment this define for debugging printfs
 #define _SHOW_MASTER_SERVER_PRINTF
@@ -35,7 +34,7 @@ MasterServer::~MasterServer()
 void MasterServer::Update(RakPeerInterface *peer)
 {	
 	unsigned serverIndex;
-	RakNetTime time;
+    RakNet::Time time;
 	// TODO - should have multiple listing security
 
 	time = RakNet::GetTime();
@@ -48,30 +47,34 @@ void MasterServer::Update(RakPeerInterface *peer)
 			if (gameServerList.serverList[serverIndex]->failedPingResponses>=NUMBER_OF_MISSED_PINGS_TO_DROP)
 			{
 				#ifdef _SHOW_MASTER_SERVER_PRINTF
-				printf("Deleting %s for lack of ping response.\n", (char*)rakPeer->PlayerIDToDottedIP(gameServerList.serverList[serverIndex]->connectionIdentifier));
+				printf("Deleting %s for lack of ping response.\n", (char*)rakPeer->GetSystemAddressFromGuid( gameServerList.serverList[serverIndex]->connectionIdentifier).ToString() );
 				#endif
 				gameServerList.serverList[serverIndex]->Clear();
 				delete gameServerList.serverList[serverIndex];
 				gameServerList.serverList.RemoveAtIndex(serverIndex);
 			}
+            
 			else
 			{
 				gameServerList.serverList[serverIndex]->nextPingTime = time + KEEP_ALIVE_PING_FREQUENCY;
-
-				if (rakPeer->GetIndexFromPlayerID(gameServerList.serverList[serverIndex]->connectionIdentifier)==-1)
+            
+                if (rakPeer->GetIndexFromSystemAddress(rakPeer->GetSystemAddressFromGuid( gameServerList.serverList[serverIndex]->connectionIdentifier)) == -1 )
 				{
-					rakPeer->Ping((char*)rakPeer->PlayerIDToDottedIP(gameServerList.serverList[serverIndex]->connectionIdentifier),
-						gameServerList.serverList[serverIndex]->connectionIdentifier.port, false);
+					rakPeer->Ping(rakPeer->GetSystemAddressFromGuid( gameServerList.serverList[serverIndex]->connectionIdentifier));
 
+//                    rakPeer->Ping((char*)rakPeer->PlayerIDToDottedIP(gameServerList.serverList[serverIndex]->connectionIdentifier),
+//                                  gameServerList.serverList[serverIndex]->connectionIdentifier.port, false);
+                   
 					gameServerList.serverList[serverIndex]->failedPingResponses++;
 #ifdef _SHOW_MASTER_SERVER_PRINTF
-					printf("Pinging %s. Waiting on %i repl(ies) so far.\n", (char*)rakPeer->PlayerIDToDottedIP(gameServerList.serverList[serverIndex]->connectionIdentifier),gameServerList.serverList[serverIndex]->failedPingResponses);
+					printf("Pinging %s. Waiting on %i repl(ies) so far.\n", rakPeer->GetSystemAddressFromGuid(gameServerList.serverList[serverIndex]->connectionIdentifier).ToString(),gameServerList.serverList[serverIndex]->failedPingResponses);
 #endif
 				}
 				else
 				{
 #ifdef _SHOW_MASTER_SERVER_PRINTF
-					printf("Not pinging %s since they are currently connected.\n", (char*)rakPeer->PlayerIDToDottedIP(gameServerList.serverList[serverIndex]->connectionIdentifier));
+                    printf("Not pinging %s since they are currently connected.\n",  rakPeer->GetSystemAddressFromGuid(gameServerList.serverList[serverIndex]->connectionIdentifier).ToString());
+                           
 #endif
 				}
 				serverIndex++;
@@ -85,33 +88,36 @@ void MasterServer::Update(RakPeerInterface *peer)
 bool MasterServer::OnReceive(RakPeerInterface *peer, Packet *packet)
 {
 
-	RakNetStatisticsStruct *rss;
-	RakNetTime connectionTime;
-	RakNetTime time;
+	RakNetStatistics *rss;
+    RakNet:Time connectionTime, time;
+//    RakNet:Time time;
 	unsigned serverIndex;
+    
 	time = RakNet::GetTime();
 
 	// Quick and dirty flood attack security:
 	// If a client has been connected for more than 5 seconds,
 	// and has sent more than 1000 bytes per second on average then ban them
-	rss=rakPeer->GetStatistics(packet->playerId);
+	rss = rakPeer->GetStatistics(packet->systemAddress , rss);
 	if (rss)
 	{
+        
 		connectionTime=time-rss->connectionStartTime;
+       
 		if (connectionTime > FLOOD_ATTACK_CHECK_DELAY &&
-			(float)(rss->bitsReceived/8) / (float) connectionTime > FLOOD_ATTACK_BYTES_PER_MS)
+			(float)( rss->runningTotal[ACTUAL_BYTES_RECEIVED]/8) / (float) connectionTime > FLOOD_ATTACK_BYTES_PER_MS)
 		{
-			rakPeer->CloseConnection(packet->playerId, true,0);
+			rakPeer->CloseConnection(packet->guid, true,0);
 #ifdef _SHOW_MASTER_SERVER_PRINTF
-			printf("%s banned for session due to for flood attack\n", (char*)rakPeer->PlayerIDToDottedIP(packet->playerId));
+			printf("%s banned for session due to for flood attack\n", rakPeer->GetSystemAddressFromGuid(packet->guid).ToString());
 #endif
-			rakPeer->AddToBanList(rakPeer->PlayerIDToDottedIP(packet->playerId));
+			rakPeer->AddToBanList(rakPeer->GetSystemAddressFromGuid(packet->guid).ToString());
 
 			// Find all servers with this IP and kill them.
 			serverIndex=0;
 			while (serverIndex < gameServerList.serverList.Size())
 			{
-				if (gameServerList.serverList[serverIndex]->connectionIdentifier.binaryAddress==packet->playerId.binaryAddress)
+				if (rakPeer->GetSystemAddressFromGuid(gameServerList.serverList[serverIndex]->connectionIdentifier).EqualsExcludingPort(rakPeer->GetSystemAddressFromGuid( packet->guid ) ) )
 				{
 					delete gameServerList.serverList[serverIndex];
 					gameServerList.serverList.RemoveAtIndex(serverIndex);
@@ -133,7 +139,7 @@ bool MasterServer::OnReceive(RakPeerInterface *peer, Packet *packet)
 	case ID_MASTER_SERVER_SET_SERVER:
 		HandleUpdateServer(packet);
 		return true;
-	case ID_PONG:
+	case ID_UNCONNECTED_PONG:
 		HandlePong(packet);
 		return false;
 	case ID_RELAYED_CONNECTION_NOTIFICATION:
@@ -156,15 +162,20 @@ bool MasterServer::PropagateToGame(Packet *packet) const
 
 void MasterServer::HandleDelistServer(Packet *packet)
 {
-	PlayerID serverPlayerID;
+//	RakNetGUID serverPlayerID;
 	int existingServerIndex;
-	BitStream bitStream(packet->data, packet->length, false);
+//	BitStream bitStream(packet->data, packet->length, false);
+//
+//	bitStream.IgnoreBits(sizeof(unsigned char)*8); // Ignore the packet type enum
 
-	bitStream.IgnoreBits(sizeof(unsigned char)*8); // Ignore the packet type enum
-	bitStream.Read(serverPlayerID.port);
-	serverPlayerID.binaryAddress=packet->playerId.binaryAddress;
+//    unsigned short port;
+//	bitStream.Read(port);
+//    this->rakPeer->GetSystemAddressFromGuid(serverPlayerID).SetPortHostOrder(port);
+//    
+//	serverPlayerID.binaryAddress = packet->playerId.binaryAddress;
 
-	existingServerIndex=gameServerList.GetIndexByPlayerID(serverPlayerID);
+	existingServerIndex = gameServerList.GetIndexByPlayerID(packet->guid);
+    
 	if (existingServerIndex>=0)
 	{
 		gameServerList.serverList[existingServerIndex]->Clear();
@@ -175,8 +186,9 @@ void MasterServer::HandleDelistServer(Packet *packet)
 		// Server does not already exist
 
 	#ifdef _SHOW_MASTER_SERVER_PRINTF
-	printf("%i servers on the list\n", gameServerList.serverList.Size());
+	printf("%i servers on the. list\n", gameServerList.serverList.Size());
 	#endif
+    
 }
 
 void MasterServer::HandleQuery(Packet *packet)
@@ -207,7 +219,7 @@ void MasterServer::HandleQuery(Packet *packet)
 
 		for (index=0; index < gameServerList.serverList.Size(); index++)
 		{
-			if (gameServerList.serverList[index]->connectionIdentifier==UNASSIGNED_PLAYER_ID)
+			if (gameServerList.serverList[index]->connectionIdentifier==UNASSIGNED_RAKNET_GUID)
 				continue;
 
 			if (gameServerList.serverList[index]->FindKey(ruleIdentifier))
@@ -216,7 +228,7 @@ void MasterServer::HandleQuery(Packet *packet)
 				if (serverIndex==MAX_UNSIGNED_LONG)
 				{
 					gameServerList.serverList[index]->numberOfKeysFound=1;
-					serversWithKeysList.Insert(gameServerList.serverList[index]);
+					serversWithKeysList.Insert(gameServerList.serverList[index],__FILE__,__LINE__);
 				}
 				else
 				{
@@ -274,7 +286,7 @@ void MasterServer::HandleQuery(Packet *packet)
 		}
 	}
 
-	rakPeer->Send(&outputBitStream, MEDIUM_PRIORITY, RELIABLE, 0, packet->playerId, false);
+	rakPeer->Send(&outputBitStream, MEDIUM_PRIORITY, RELIABLE, 0, packet->guid, false);
 }
 
 void MasterServer::HandleUpdateServer(Packet *packet)
@@ -285,7 +297,8 @@ void MasterServer::HandleUpdateServer(Packet *packet)
 	incomingBitStream.IgnoreBits(8*sizeof(unsigned char));
 
 	gameServer = DeserializeServer(&incomingBitStream);
-	gameServer->connectionIdentifier.binaryAddress=packet->playerId.binaryAddress;
+    
+	gameServer->connectionIdentifier = packet->guid;
 
 	UpdateServerList(gameServer, true, &newServerAdded);
 
@@ -294,7 +307,7 @@ void MasterServer::HandleUpdateServer(Packet *packet)
 		#ifdef _SHOW_MASTER_SERVER_PRINTF
 		printf("Server added. %i servers on the list\n", gameServerList.serverList.Size());
 		#endif
-		gameServer->originationId=packet->playerId;
+		gameServer->originationId = packet->guid;
 	}
 	#ifdef _SHOW_MASTER_SERVER_PRINTF
 	else
@@ -326,11 +339,13 @@ void MasterServer::HandleRelayedConnectionNotification(Packet *packet)
 	BitStream outgoingBitStream;
 	outgoingBitStream.Write((unsigned char)ID_RELAYED_CONNECTION_NOTIFICATION);
 	// Assumes the game client is on the same computer as the master client
-	outgoingBitStream.Write(packet->playerId.binaryAddress); // This is the public IP, which the sender doesn't necessarily know
+	outgoingBitStream.Write(packet->systemAddress.ToString()); // This is the public IP, which the sender doesn't necessarily know
 	outgoingBitStream.Write(clientGamePort);
 
-	PlayerID targetID;
-	rakPeer->IPToPlayerID(str, serverGamePort, &targetID);
+	RakNetGUID targetID;
+    SystemAddress sa;
+    sa.FromStringExplicitPort(str, serverGamePort);
+    targetID = rakPeer->GetGuidFromSystemAddress(sa);
     
 	// Given the IP and port of the game system, give me the index into the game server list
 	int serverIndex = gameServerList.GetIndexByPlayerID(targetID);
@@ -338,14 +353,14 @@ void MasterServer::HandleRelayedConnectionNotification(Packet *packet)
 	if (serverIndex>=0)
 	{
 		#ifdef _SHOW_MASTER_SERVER_PRINTF
-		printf("ID_RELAYED_CONNECTION_NOTIFICATION sent to %s:%i from %s:%i\n", str, serverGamePort, rakPeer->PlayerIDToDottedIP(packet->playerId), packet->playerId.port);
+		printf("ID_RELAYED_CONNECTION_NOTIFICATION sent to %s:%i from %s:%i\n", str, serverGamePort, packet->systemAddress.ToString(), packet->systemAddress.GetPort());
 		#endif
 		rakPeer->Send(&outgoingBitStream, HIGH_PRIORITY, RELIABLE, 0, gameServerList.serverList[serverIndex]->originationId, false);
 	}
 	else
 	{
 #ifdef _SHOW_MASTER_SERVER_PRINTF
-		printf("ID_RELAYED_CONNECTION_NOTIFICATION not sent to %s:%i from %s:%i.\nMaster server does not know about target system.\n", str, serverGamePort, rakPeer->PlayerIDToDottedIP(packet->playerId), packet->playerId.port);
+		printf("ID_RELAYED_CONNECTION_NOTIFICATION not sent to %s:%i from %s:%i.\nMaster server does not know about target system.\n", str, serverGamePort, packet->systemAddress.ToString(), packet->systemAddress.GetPort());
 #endif
 	}
 

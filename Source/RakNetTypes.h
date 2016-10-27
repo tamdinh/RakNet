@@ -197,16 +197,6 @@ struct RAK_DLL_EXPORT SystemAddress
 	SystemAddress();
 	SystemAddress(const char *str);
 	SystemAddress(const char *str, unsigned short port);
-
-
-
-
-
-
-
-
-
-
 	/// SystemAddress, with RAKNET_SUPPORT_IPV6 defined, holds both an sockaddr_in6 and a sockaddr_in
 	union// In6OrIn4
 	{

@@ -16,7 +16,7 @@
 #define __MASTER_SERVER_H
 
 #include "MasterCommon.h"
-#include "NetworkTypes.h"
+#include "RakNetTypes.h"
 
 /// \ingroup MASTER_SERVER_GROUP
 /// \brief implements the master server

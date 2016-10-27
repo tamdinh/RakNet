@@ -12,25 +12,28 @@
 
 #include "MasterCommon.h"
 #include "MasterServer.h"
-#include "RakNetworkFactory.h"
 #include "RakPeerInterface.h"
 #include <cstdio>
 #include <cstring>
-#ifdef WIN32
-#include <conio.h>
-#else
-#include "../Unix/kbhit.h"
-#endif
+
+//#ifdef WIN32
+//#include <conio.h>
+//#else
+//#include "kbhit.h"
+//#endif
 
 #ifdef _WIN32
 #include <conio.h>
 #include <windows.h> // Sleep
 #else
-#include "../Unix/kbhit.h"
+#include "kbhit.h"
 #include <unistd.h> // usleep
 #endif
 
 #define READCHAR(arg) gets(arg); ch=arg[0];
+
+#define MAX_CLIENTS 10
+#define SERVER_PORT 60000
 
 int main(void)
 {
@@ -43,11 +46,9 @@ int main(void)
 	char ch;
 	Packet *p;
 
-	RakPeerInterface *testGameMasterServer;
-
-	testGameMasterServer = RakNetworkFactory::GetRakPeerInterface();
-	testGameMasterServer->Initialize(10, 60000, 0);
-	testGameMasterServer->SetMaximumIncomingConnections(8);
+	RakPeerInterface *testGameMasterServer = RakNet::RakPeerInterface::GetInstance();;
+    SocketDescriptor sd(SERVER_PORT,0);
+    testGameMasterServer->Startup(MAX_CLIENTS, &sd, 1);
 	testGameMasterServer->AttachPlugin(&masterServer);
 
 	printf("This project shows how to use the master server.\n");

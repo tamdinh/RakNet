@@ -9,7 +9,6 @@
  */
 
 #include "MasterCommon.h"
-#include "RakNetworkFactory.h"
 #include "RakPeerInterface.h"
 #include <cstring>
 #include "GetTime.h"
@@ -36,7 +35,7 @@ GameServerRule::~GameServerRule()
 
 GameServer::GameServer()
 {
-	connectionIdentifier=UNASSIGNED_PLAYER_ID;
+	connectionIdentifier=UNASSIGNED_RAKNET_GUID;
 	nextPingTime=0;
 	failedPingResponses=0;
 	lastUpdateTime=RakNet::GetTime();
@@ -50,9 +49,9 @@ void GameServer::Clear()
 	unsigned i;
 	for (i=0; i < serverRules.Size(); i++)
 		delete serverRules[i];
-	serverRules.Clear();
+    serverRules.Clear(true, __FILE__, __LINE__);
 }
-bool GameServer::FindKey(char *key)
+bool GameServer::FindKey(const char *key)
 {
 	unsigned i;
 	for (i=0; i < serverRules.Size(); i++)
@@ -78,7 +77,7 @@ void GameServerList::Clear(void)
 	unsigned i;
 	for (i=0; i < serverList.Size(); i++)
 		delete serverList[i];
-	serverList.Clear();
+    serverList.Clear(true, __FILE__, __LINE__);
 }
 void GameServerList::SortOnKey(char *key, bool ascending)
 {
@@ -186,7 +185,7 @@ int GameServerList::Partition(int low, int high, bool ascending)
 	return right;
 }
 
-int GameServerList::GetIndexByPlayerID(PlayerID playerID)
+int GameServerList::GetIndexByPlayerID(RakNetGUID playerID)
 {
 	int i;
 	for (i=0; i < (int)serverList.Size(); i++)
@@ -199,7 +198,8 @@ int GameServerList::GetIndexByPlayerID(PlayerID playerID)
 
 MasterCommon::MasterCommon()
 {
-//	rakPeer = RakNetworkFactory::GetRakPeerInterface();
+    rakPeer = RakPeerInterface::GetInstance();
+    stringCompressor = StringCompressor::Instance();
 }
 void MasterCommon::ClearServerList(void)
 {
@@ -276,7 +276,7 @@ bool MasterCommon::IsReservedRuleIdentifier(char *ruleIdentifier)
 	return false;
 }
 
-void MasterCommon::AddDefaultRulesToServer(GameServer *gameServer, PlayerID playerID)
+void MasterCommon::AddDefaultRulesToServer(GameServer *gameServer, RakNetGUID playerID)
 {
 	GameServerRule *gameServerRule;
 
@@ -285,21 +285,23 @@ void MasterCommon::AddDefaultRulesToServer(GameServer *gameServer, PlayerID play
 	gameServerRule->key=new char[strlen("IP")+1];
 	strcpy(gameServerRule->key, "IP");
 	gameServerRule->stringValue=new char[22]; // Should be enough to hold an IP address
-	strncpy(gameServerRule->stringValue, rakPeer->PlayerIDToDottedIP(playerID), 21);
+	strncpy(gameServerRule->stringValue, rakPeer->GetSystemAddressFromGuid(playerID).ToString(), 21);
+    
+    
 	gameServerRule->stringValue[21]=0;
-	gameServer->serverRules.Insert(gameServerRule);
+	gameServer->serverRules.Insert(gameServerRule,__FILE__,__LINE__);
 
 	gameServerRule = new GameServerRule;
 	gameServerRule->key=new char[strlen("Port")+1];
 	strcpy(gameServerRule->key, "Port");
-	gameServerRule->intValue=playerID.port;
-	gameServer->serverRules.Insert(gameServerRule);
+    gameServerRule->intValue = rakPeer->GetSystemAddressFromGuid(playerID).GetPort();
+	gameServer->serverRules.Insert(gameServerRule,__FILE__,__LINE__);
 
 	gameServerRule = new GameServerRule;
 	gameServerRule->key=new char[strlen("Ping")+1];
 	strcpy(gameServerRule->key, "Ping");
 	gameServerRule->intValue=9999;
-	gameServer->serverRules.Insert(gameServerRule);
+	gameServer->serverRules.Insert(gameServerRule,__FILE__,__LINE__);
 }
 void MasterCommon::HandlePong(Packet *packet)
 {
@@ -307,7 +309,7 @@ void MasterCommon::HandlePong(Packet *packet)
 	int serverIndex;
 	unsigned int pingTime;
 
-	serverIndex=gameServerList.GetIndexByPlayerID(packet->playerId);
+	serverIndex=gameServerList.GetIndexByPlayerID(packet->guid);
 	if (serverIndex>=0)
 	{
 		gameServerList.serverList[serverIndex]->failedPingResponses=0;
@@ -389,7 +391,7 @@ bool MasterCommon::UpdateServerRule(GameServer *gameServer, char *ruleIdentifier
 		{
 			gameServerRule->intValue=intData;
 		}
-		gameServer->serverRules.Insert(gameServerRule);
+		gameServer->serverRules.Insert(gameServerRule,__FILE__,__LINE__);
 		return true;
 	}
 
@@ -407,15 +409,14 @@ bool MasterCommon::RemoveServerRule(GameServer *gameServer, char *ruleIdentifier
 	return false;
 }
 
-void MasterCommon::SerializePlayerID(PlayerID *playerID, BitStream *outputBitStream)
+void MasterCommon::SerializePlayerID(RakNetGUID *playerID, BitStream *outputBitStream)
 {
-	outputBitStream->Write(playerID->binaryAddress);
-	outputBitStream->Write(playerID->port);
+	outputBitStream->Write(rakPeer->GetSystemAddressFromGuid(*playerID).ToString());
+	outputBitStream->Write(rakPeer->GetSystemAddressFromGuid(*playerID).GetPort());
 }
 void MasterCommon::SerializeRule(GameServerRule *gameServerRule, BitStream *outputBitStream)
 {
 	stringCompressor->EncodeString(gameServerRule->key, 256, outputBitStream);
-
 	if (gameServerRule->stringValue)
 	{
 		outputBitStream->Write(true);
@@ -427,13 +428,17 @@ void MasterCommon::SerializeRule(GameServerRule *gameServerRule, BitStream *outp
 		outputBitStream->WriteCompressed(gameServerRule->intValue);
 	}
 }
-void MasterCommon::DeserializePlayerID(PlayerID *playerID, BitStream *inputBitStream)
-{
-	*playerID=UNASSIGNED_PLAYER_ID;
 
-	inputBitStream->Read(playerID->binaryAddress);
-	inputBitStream->Read(playerID->port);
+void MasterCommon::DeserializePlayerID(RakNetGUID *playerID, BitStream *inputBitStream)
+{
+	*playerID=UNASSIGNED_RAKNET_GUID;
+    char* address;
+    int port;
+	inputBitStream->Read(address);
+	inputBitStream->Read(port);
+    rakPeer->GetSystemAddressFromGuid(*playerID).FromStringExplicitPort(address, port);
 }
+
 GameServerRule * MasterCommon::DeserializeRule(BitStream *inputBitStream)
 {
 	char output[256];
@@ -545,7 +550,7 @@ GameServer * MasterCommon::DeserializeServer(BitStream *inputBitStream)
 		if (IsReservedRuleIdentifier(gameServerRule->key))
 			delete gameServerRule;
 		else
-			gameServer->serverRules.Insert(gameServerRule);
+			gameServer->serverRules.Insert(gameServerRule,__FILE__,__LINE__);
 	}
 	return gameServer;
 }
@@ -603,7 +608,7 @@ GameServer* MasterCommon::UpdateServerList(GameServer *gameServer, bool deleteSi
 	{
 		// If not found, then add it to the list.
 		AddDefaultRulesToServer(gameServer, gameServer->connectionIdentifier);
-		gameServerList.serverList.Insert(gameServer);
+		gameServerList.serverList.Insert(gameServer,__FILE__,__LINE__);
 		*newServerAdded=true;
 		return gameServer;
 	}
